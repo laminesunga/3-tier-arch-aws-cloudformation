@@ -1,0 +1,639 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create a 3-tier arch"
+Parameters:
+  EnvironmentName: 
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: 3-TierArch
+
+  KeyPair:
+    Description: Please enter the name of the SSH Key Pair for remote access to EC2 instances
+    Type: String
+    
+
+  DatabaseName:
+    Description: Please enter the name of the MySQL database
+    Type: String
+    Default: demo-database
+
+  MasterUsername:
+    Description: Please enter the Master Username for the RDS Database
+    Type: String
+
+  MasterUserPassword:
+    Description: Please enter the Master Password for the RDS Database
+    Type: String
+  
+  VpcCIDR:
+    Description: VPC CIDR Range
+    Type: String
+    Default: 10.0.0.0/16
+
+  WebPublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.1.0/24
+   
+  WebPublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.2.0/24
+  BastionHostPublicSubnet3CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the third Availability Zone
+    Type: String
+    Default: 10.0.3.0/24
+  AppPrivateSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.4.0/24
+  AppPrivateSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.5.0/24
+  AppPrivateSubnet3CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.6.0/24
+  AppPrivateSubnet4CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.7.0/24
+  MySQLDBSubnetGroupName:
+    Description: Please enter name for RDS Database Instance Subnet Group
+    Type: String
+    Default: MySQLDBSubnetGroup
+
+  
+Resources:
+  # --- network ---
+  # Step 1: Create a VPC
+  MyProjectVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-VPC
+    #Step 2: Create Subnets
+
+  WebPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyProjectVPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: !Ref WebPublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Public-Web-Subnet-(AZ1)
+
+  WebPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+       VpcId: !Ref MyProjectVPC
+       AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+       CidrBlock: !Ref WebPublicSubnet2CIDR
+       MapPublicIpOnLaunch: true
+       Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Public-Web-Subnet-(AZ2)
+  BastionHostPublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+       VpcId: !Ref MyProjectVPC
+       AvailabilityZone: !Select [ 2, !GetAZs  '' ]
+       CidrBlock: !Ref BastionHostPublicSubnet3CIDR
+       MapPublicIpOnLaunch: true
+       Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Public-Web-Subnet-(AZ3)
+  AppPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+       VpcId: !Ref MyProjectVPC
+       AvailabilityZone: !Select [ 0, !GetAZs '' ]
+       CidrBlock: !Ref AppPrivateSubnet1CIDR
+       MapPublicIpOnLaunch: false
+       Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Private-App-Subnet-(AZ1)
+  AppPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyProjectVPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref AppPrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Private-App-Subnet-(AZ2)
+
+  AppPrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyProjectVPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref AppPrivateSubnet3CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Private-App-Subnet-(AZ1)
+     
+  AppPrivateSubnet4:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyProjectVPC
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref AppPrivateSubnet4CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-Private-App-Subnet-(AZ2)
+
+  #Step 3: Create Security Groups for Bastion Host, web tier , Web LB , app LB , app tier and DB
+
+  BastionHostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: MyProjectVPC
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-BastionHost-SecurityGroup
+      GroupDescription: "Security group for Bastion Host"
+      VpcId: !Ref MyProjectVPC
+
+  BastionHostSecurityGroupSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress   
+    DependsOn: BastionHostSecurityGroup
+    Properties:
+      CidrIp: 0.0.0.0/0
+      Description: "Allow SSH from local machine"
+      GroupId: !Ref BastionHostSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+  
+  WebTierLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-WebTierLB-SecurityGroup
+      GroupDescription: "Security group for Web Tier Load Balancer"
+      VpcId: !Ref MyProjectVPC
+
+  WebTierLBSecurityGroupHTTPIngress:
+    Type: AWS::EC2::SecurityGroupIngress   
+    DependsOn: WebTierLBSecurityGroup
+    Properties:
+      CidrIp: 0.0.0.0/0
+      Description: "Allow HTTP from anywhere"
+      GroupId: !Ref WebTierLBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+
+  WebTierSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: BastionHostSecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-WebTier-SecurityGroup
+      GroupDescription: "Security group for Web Tier"
+      VpcId: !Ref MyProjectVPC
+
+  WebTierSecurityGroupHTTPIngress:
+    Type: AWS::EC2::SecurityGroupIngress   
+    DependsOn: WebTierLBSecurityGroup
+    Properties:
+      SourceSecurityGroupId: !GetAtt WebTierLBSecurityGroup.GroupId
+      Description: "Allow HTTP from Web Tier Load Balancer"
+      GroupId: !Ref WebTierSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+
+  WebTierSecurityGroupSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress   
+    DependsOn: BastionHostSecurityGroup
+    Properties:
+      SourceSecurityGroupId: !GetAtt BastionHostSecurityGroup.GroupId
+      Description: "Allow SSH from Bastion Host"
+      GroupId: !GetAtt WebTierSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+
+  AppTierLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-AppTierLB-SecurityGroup
+      GroupDescription: "Security group for App Tier Load Balancer"
+      VpcId: !Ref MyProjectVPC
+
+  AppTierLBSecurityGroupHTTPIngress:
+    Type: AWS::EC2::SecurityGroupIngress   
+    DependsOn: AppTierLBSecurityGroup
+    Properties:
+      SourceSecurityGroupId: !GetAtt WebTierSecurityGroup.GroupId
+      Description: "Allow HTTP from Web Tier Auto Scaling Group"
+      GroupId: !Ref AppTierLBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+
+  AppTierSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: WebTierSecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-AppTier-SecurityGroup
+      GroupDescription: "Security group for App Tier"
+      VpcId: !Ref MyProjectVPC
+
+  AppTierSecurityGroupHTTPIngress:
+    Type: AWS::EC2::SecurityGroupIngress   
+    DependsOn: AppTierSecurityGroup
+    Properties:
+      SourceSecurityGroupId: !GetAtt AppTierLBSecurityGroup.GroupId
+      Description: "Allow HTTP from Web Tier Load Balancer"
+      GroupId: !GetAtt AppTierSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+
+  AppTierSecurityGroupSSHIngress:
+    Type: AWS::EC2::SecurityGroupIngress   
+    DependsOn: AppTierSecurityGroup
+    Properties:
+      SourceSecurityGroupId: !GetAtt BastionHostSecurityGroup.GroupId
+      Description: "Allow SSH from Bastion Host"
+      GroupId: !GetAtt AppTierSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+
+  DatabaseSecurityGroup:
+    Type: AWS::RDS::DBSecurityGroup
+    DependsOn: AppTierSecurityGroup
+    Properties: 
+      DBSecurityGroupIngress: 
+        - EC2SecurityGroupId: !GetAtt AppTierSecurityGroup.GroupId
+        - EC2SecurityGroupId: !GetAtt BastionHostSecurityGroup.GroupId
+      EC2VpcId: !Ref MyProjectVPC
+      GroupDescription: "Security Group for Database Tier"
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-DataTier-SecurityGroup
+  # Create the bastion Host
+  BastionHost:
+    Type: AWS::EC2::Instance
+    DependsOn: BastionHostSecurityGroup
+    Properties:
+      ImageId: ami-00c39f71452c08778
+      KeyName: !Ref KeyPair
+      InstanceType: t2.micro
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          AssociatePublicIpAddress: true
+          SubnetId: !GetAtt BastionHostPublicSubnet3.SubnetId
+          GroupSet:
+            - !GetAtt BastionHostSecurityGroup.GroupId
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-BastionHost
+      UserData: 
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y nmap
+            yum install -y mysql
+
+  #Step 4: Create an Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: MyProjectVPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn: InternetGateway
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref MyProjectVPC
+  
+  #Step 5: Create NAT Gateway
+  
+  NATElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: MyProjectVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ElasticIP
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: WebPublicSubnet1
+    Properties:
+      ConnectivityType: public
+      AllocationId: !GetAtt NATElasticIP.AllocationId
+      SubnetId: !GetAtt WebPublicSubnet1.SubnetId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-NatGateway
+
+  #Next is to create the route table for the Public and private subnet 
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyProjectVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PublicRouteTable
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  WebPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPublicRoute
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref WebPublicSubnet1
+
+  WebPublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPublicRoute
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref WebPublicSubnet2
+
+  BastionHostPublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPublicRoute
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref BastionHostPublicSubnet3
+
+  # route table for private subnets
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyProjectVPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${EnvironmentName}-PrivateRouteTable
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  AppPrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPrivateRoute
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref AppPrivateSubnet1
+
+  AppPrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPrivateRoute
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref AppPrivateSubnet2
+
+  AppPrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPrivateRoute
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref AppPrivateSubnet3
+
+  AppPrivateSubnet4RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPrivateRoute
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref AppPrivateSubnet4
+  
+  #Step 6: Create The Lunch Templates and AutoScalingGroup
+  WebTierLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn: WebTierSecurityGroup
+    Properties:
+      LaunchTemplateName: !Sub ${EnvironmentName}-WebTier-LaunchTemplate
+      LaunchTemplateData:
+        ImageId: ami-00c39f71452c08778
+        InstanceType: t2.micro
+        KeyName: !Ref KeyPair
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref WebTierSecurityGroup
+        UserData: 
+          Fn::Base64: 
+            !Sub |
+              #!/bin/bash
+              #Update the OS 
+              sudo yum update -y
+              #Install, enable, and start Apache Web Server
+              sudo yum install -y httpd 
+              sudo systemctl enable httpd 
+              sudo systemctl start httpd
+              #Modify the webpage
+              sudo echo "<html><body><h1>Welcome to your AWS 3-Tier Architecture - Web Tier! </h1></body> </html>" > /var/www/html/index.html
+  #Next is to create the LB , TG and ASG 
+  WebTierApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Name: !Sub ${EnvironmentName}-WebTier-LoadBalancer
+      Type: application
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups: 
+        - !GetAtt WebTierLBSecurityGroup.GroupId
+      Subnets:
+        - !Ref WebPublicSubnet1
+        - !Ref WebPublicSubnet2
+
+  WebTierTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub ${EnvironmentName}-WebTier-TargetGroup
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      Port: 80
+      Protocol: HTTP
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      TargetType: instance
+      Matcher: 
+        HttpCode: "200"
+      VpcId: !Ref MyProjectVPC
+  
+  WebTierHTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: WebTierTargetGroup
+    Properties:
+      LoadBalancerArn: !Ref WebTierApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTierTargetGroup
+      
+  WebTierAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: WebTierLaunchTemplate
+    Properties:
+      AutoScalingGroupName: !Sub ${EnvironmentName}-WebTier-AutoScaleGroup
+      DesiredCapacity: 2
+      MinSize: 2
+      MaxSize: 4
+      LaunchTemplate: 
+        LaunchTemplateId: !Ref WebTierLaunchTemplate
+        Version: !GetAtt WebTierLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs: 
+        - !Ref WebTierTargetGroup
+      VPCZoneIdentifier:
+        - !Ref WebPublicSubnet1
+        - !Ref WebPublicSubnet2
+
+  AppTierLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn: AppTierSecurityGroup
+    Properties:
+      LaunchTemplateName: !Sub ${EnvironmentName}-AppTier-LaunchTemplate
+      LaunchTemplateData:
+        ImageId: ami-00c39f71452c08778
+        InstanceType: t2.micro
+        KeyName: !Ref KeyPair
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: false
+            Groups:
+              - !Ref AppTierSecurityGroup
+        UserData: 
+          Fn::Base64: 
+            !Sub |
+              #!/bin/bash
+              #Update the OS 
+              sudo yum update -y
+              #Install, enable, and start Apache Web Server
+              sudo yum install -y httpd 
+              sudo systemctl enable httpd 
+              sudo systemctl start httpd
+              #Modify the webpage
+              sudo echo "<html><body><h1>Welcome to your AWS 3-Tier Architecture - APP Tier! </h1></body> </html>" > /var/www/html/index.html
+  AppTierApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: AppTierLBSecurityGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-AppTier-LoadBalancer
+      Type: application
+      IpAddressType: ipv4
+      Scheme: internal
+      SecurityGroups: 
+        - !GetAtt AppTierLBSecurityGroup.GroupId
+      Subnets:
+        - !Ref AppPrivateSubnet1
+        - !Ref AppPrivateSubnet2
+
+  AppTierTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub ${EnvironmentName}-AppTier-TargetGroup
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      Port: 80
+      Protocol: HTTP
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      TargetType: instance
+      Matcher: 
+        HttpCode: "200"
+      VpcId: !Ref MyProjectVPC
+  
+  AppTierHTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: AppTierTargetGroup
+    Properties:
+      LoadBalancerArn: !Ref AppTierApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTierTargetGroup
+
+  AppTierAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: AppTierLaunchTemplate
+    Properties:
+      AutoScalingGroupName: !Sub ${EnvironmentName}-AppTier-AutoScaleGroup
+      DesiredCapacity: 2
+      MinSize: 2
+      MaxSize: 4
+      LaunchTemplate: 
+        LaunchTemplateId: !Ref AppTierLaunchTemplate
+        Version: !GetAtt AppTierLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs: 
+        - !Ref AppTierTargetGroup
+      VPCZoneIdentifier:
+        - !Ref AppPrivateSubnet1
+        - !Ref AppPrivateSubnet2
+  #Now, let’s create the Database tier.
+  MySQLDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties: 
+      DBSubnetGroupDescription: "Subnets for MySQL RDS Instances"
+      DBSubnetGroupName: !Ref MySQLDBSubnetGroupName
+      SubnetIds: 
+        - !GetAtt AppPrivateSubnet3.SubnetId
+        - !GetAtt AppPrivateSubnet4.SubnetId
+  
+  MySQLDatabase:
+    Type: AWS::RDS::DBInstance
+    DependsOn: MySQLDBSubnetGroup
+    Properties:
+      Engine: mysql
+      EngineVersion: 8.0.32
+      DBInstanceIdentifier: !Ref DatabaseName
+      DBSecurityGroups: 
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref MySQLDBSubnetGroup
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      DBInstanceClass: db.t2.small
+      MultiAZ: true
+      AllocatedStorage: 20
+
+Outputs:
+  BastionHostPIP:
+    Description: The Public IP Address of the Bastion Host
+    Value: !GetAtt BastionHost.PublicIp  
+  WebTierLoadBalancerURL:
+    Description: The URL of the Web Tier Application Load Balancer
+    Value: !GetAtt WebTierApplicationLoadBalancer.DNSName
+  AppTierLoadBalancerURL:
+    Description: The URL of the App Tier Application Load Balancer
+    Value: !GetAtt AppTierApplicationLoadBalancer.DNSName
+  MySQLDatabaseEndpointAddress:
+    Description: The FQDN of the MySQL Database
+    Value: !GetAtt MySQLDatabase.Endpoint.Address
+  MySQLDatabasePort:
+    Description: The TCP port of the MySQL Database
+    Value: !GetAtt MySQLDatabase.Endpoint.Port
+  
