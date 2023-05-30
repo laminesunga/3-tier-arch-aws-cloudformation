@@ -30,7 +30,7 @@ Database Tier
 
 Deploy Bastion Host 
 
-This is a special-purpose instance that is used to securely access and manage other instances within a private network. We could also using Ansible to sacale and automate.
+This is an instance that is used to securely access and manage other instances within a private network. We could also use Ansible to sacale and automate.
 
 * Deploy the EC2 Bastion Host in the third public subnet
 * EC2 Securit Group allows SSH inbound from your local IP address.
